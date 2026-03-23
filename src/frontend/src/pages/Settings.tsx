@@ -12,20 +12,45 @@ import {
   useIsCallerAdmin,
   useSaveCallerUserProfile,
 } from "../hooks/useQueries";
+import { getSecretParameter } from "../utils/urlParams";
 
 export function Settings() {
   const { data: profile, isLoading } = useGetCallerUserProfile();
-  const { data: isAdmin } = useIsCallerAdmin();
+  const { data: isAdmin, refetch: refetchAdmin } = useIsCallerAdmin();
   const save = useSaveCallerUserProfile();
   const { identity } = useInternetIdentity();
   const { actor } = useActor();
   const [name, setName] = useState("");
   const [adminToken, setAdminToken] = useState("");
   const [claimPending, setClaimPending] = useState(false);
+  const [autoClaimed, setAutoClaimed] = useState(false);
 
   useEffect(() => {
     if (profile?.name) setName(profile.name);
   }, [profile?.name]);
+
+  // Auto-populate token from URL/session and attempt silent claim
+  useEffect(() => {
+    if (isAdmin || autoClaimed) return;
+    const token = getSecretParameter("caffeineAdminToken");
+    if (token) {
+      setAdminToken(token);
+      if (actor) {
+        setAutoClaimed(true);
+        setClaimPending(true);
+        actor
+          .claimSuperAdminByToken(token)
+          .then((success) => {
+            if (success) {
+              toast.success("Super Admin role claimed successfully.");
+              refetchAdmin();
+            }
+          })
+          .catch(() => {})
+          .finally(() => setClaimPending(false));
+      }
+    }
+  }, [actor, isAdmin, autoClaimed, refetchAdmin]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,6 +72,7 @@ export function Settings() {
       if (success) {
         toast.success("Super Admin role claimed. Please refresh the page.");
         setAdminToken("");
+        refetchAdmin();
       } else {
         toast.error("Invalid admin token. Please check and try again.");
       }
@@ -123,7 +149,7 @@ export function Settings() {
           <CardContent>
             <p className="text-zinc-500 text-xs mb-4">
               If you are the app owner, enter the admin token to claim Super
-              Admin access for your account.
+              Admin access.
             </p>
             <form onSubmit={handleClaimAdmin} className="space-y-4">
               <div className="space-y-2">

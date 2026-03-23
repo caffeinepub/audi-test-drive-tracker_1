@@ -1,8 +1,10 @@
 import { Toaster } from "@/components/ui/sonner";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { type AppPage, Layout } from "./components/Layout";
+import { useActor } from "./hooks/useActor";
 import { useInternetIdentity } from "./hooks/useInternetIdentity";
 import {
   UserRole,
@@ -18,10 +20,38 @@ import { ProfileSetupModal } from "./pages/ProfileSetupModal";
 import { Settings } from "./pages/Settings";
 import { TestDrives } from "./pages/TestDrives";
 import { UsersPage } from "./pages/Users";
+import { getSecretParameter } from "./utils/urlParams";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 10000, retry: 1 } },
 });
+
+/**
+ * Attempts to auto-claim Super Admin using the token embedded in the
+ * deployment URL. Runs once per session after the actor is ready.
+ */
+function useAutoClaimAdmin() {
+  const { actor } = useActor();
+  const { data: isAdmin, refetch: refetchAdmin } = useIsCallerAdmin();
+  const attempted = useRef(false);
+
+  useEffect(() => {
+    if (attempted.current || isAdmin || !actor) return;
+    const token = getSecretParameter("caffeineAdminToken");
+    if (!token) return;
+    attempted.current = true;
+    actor
+      .claimSuperAdminByToken(token)
+      .then((success) => {
+        if (success) {
+          toast.success("Super Admin role claimed.");
+          refetchAdmin();
+          queryClient.invalidateQueries({ queryKey: ["callerRole"] });
+        }
+      })
+      .catch(() => {});
+  }, [actor, isAdmin, refetchAdmin]);
+}
 
 function AppContent() {
   const { identity, isInitializing } = useInternetIdentity();
@@ -35,6 +65,9 @@ function AppContent() {
   } = useGetCallerUserProfile();
   const { data: isAdmin, isLoading: adminLoading } = useIsCallerAdmin();
   const { data: callerRole, isLoading: roleLoading } = useGetCallerUserRole();
+
+  // Auto-claim admin token from URL as soon as actor is available
+  useAutoClaimAdmin();
 
   const isSuperAdmin = isAdmin === true;
   const effectiveRole: "superadmin" | "admin" | "user" = isSuperAdmin
